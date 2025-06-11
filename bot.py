@@ -1,0 +1,416 @@
+# bot.py
+import os
+import discord
+from discord.commands import SlashCommandGroup
+from discord.ext import commands
+from dotenv import load_dotenv
+
+# Use the new asynchronous database module
+import database as db
+
+# --- CONFIGURATION ---
+load_dotenv()
+BOT_TOKEN = os.getenv('DISCORD_TOKEN')
+ADMIN_LOG_CHANNEL_ID = int(os.getenv('ADMIN_LOG_CHANNEL_ID')) if os.getenv('ADMIN_LOG_CHANNEL_ID') else None
+
+# Thematic role/user IDs for those who can influence the "Star Stream"
+CONSTELLATION_USER_IDS = [1374059561417441324, 1072508556907139133] # Formerly GENERATOR_USER_IDS
+CONSTELLATION_ROLE_IDS = [1382422834965385318, 1382423081565425694] # Formerly GENERATOR_ROLE_IDS
+
+# Thematic Currency Name
+CURRENCY_NAME = "Starstream Coin"
+CURRENCY_SYMBOL = "SSC"
+
+# Guild ID for Constellation-level commands
+MAIN_GUILD_ID = 1382416574811734190
+# --- END CONFIGURATION ---
+
+# --- BOT SETUP ---
+intents = discord.Intents.default()
+intents.members = True
+intents.guilds = True
+
+bot = commands.Bot(command_prefix="/", intents=intents)
+# --- END BOT SETUP ---
+
+# --- THEME & EMBED FACTORY ---
+class EmbedFactory:
+    """A factory for creating standardized, ORV-themed embeds."""
+    FOOTER_TEXT = "A Message from the Star Stream"
+    
+    # [BUG FIX] Made `description` an optional argument with a default value.
+    @staticmethod
+    def create(title: str, color: discord.Color, description: str = "", **kwargs) -> discord.Embed:
+        embed = discord.Embed(title=title, description=description, color=color, **kwargs)
+        if "author_name" in kwargs and "author_icon" in kwargs:
+            embed.set_author(name=kwargs["author_name"], icon_url=kwargs["author_icon"])
+        embed.set_footer(text=EmbedFactory.FOOTER_TEXT)
+        return embed
+
+# --- PERMISSIONS ---
+def is_constellation(ctx: discord.ApplicationContext) -> bool:
+    """Check if the user is a 'Constellation' (admin/generator)."""
+    author = ctx.author
+    if author.id in CONSTELLATION_USER_IDS: return True
+    author_role_ids = [role.id for role in author.roles]
+    if any(role_id in CONSTELLATION_ROLE_IDS for role_id in author_role_ids): return True
+    return False
+
+# --- LOGGING ---
+async def send_log(embed: discord.Embed):
+    """Sends a log message to the Akashic Records (admin channel)."""
+    if not ADMIN_LOG_CHANNEL_ID:
+        print("Warning: ADMIN_LOG_CHANNEL_ID is not set. Skipping log.")
+        return
+    try:
+        channel = bot.get_channel(ADMIN_LOG_CHANNEL_ID) or await bot.fetch_channel(ADMIN_LOG_CHANNEL_ID)
+        if isinstance(channel, discord.TextChannel):
+            await channel.send(embed=embed)
+    except (discord.NotFound, discord.Forbidden) as e:
+        print(f"Error logging to channel {ADMIN_LOG_CHANNEL_ID}: {e}")
+    except Exception as e:
+        print(f"An unexpected error occurred while sending a log: {e}")
+
+# --- BOT EVENTS ---
+@bot.event
+async def on_ready():
+    """Event: The Star Stream connection is stable."""
+    print(f'Logged in as {bot.user} | The Star Stream is watching.')
+    await db.init_db()
+    await bot.sync_commands()
+    print("All Scenarios (Commands) have been synced with Discord.")
+    if not ADMIN_LOG_CHANNEL_ID:
+        print("WARNING: ADMIN_LOG_CHANNEL_ID is not set. The Akashic Records will not be updated.")
+
+# --- AUTOCOMPLETE ---
+async def autocomplete_shop_items(ctx: discord.AutocompleteContext):
+    """Autocompletes item names for the Dokkaebi Bag."""
+    if not ctx.interaction.guild: return []
+    items = await db.get_all_shop_items(ctx.interaction.guild.id)
+    return [item['name'] for item in items if item['name'].lower().startswith(ctx.value.lower())]
+
+# --- USER COMMANDS ---
+@bot.slash_command(name="balance", description=f"Examine your or another Incarnation's {CURRENCY_NAME} balance.")
+async def balance(ctx: discord.ApplicationContext, user: discord.Option(discord.Member, "The Incarnation to view.", required=False)):
+    target_user = user or ctx.author
+    user_balance = await db.get_balance(target_user.id)
+    
+    embed = EmbedFactory.create(
+        title=f"「{target_user.display_name}'s Fable」",
+        description=f"This Incarnation holds **{user_balance:,}** {CURRENCY_SYMBOL}.",
+        color=discord.Color.gold()
+    )
+    embed.set_thumbnail(url=target_user.display_avatar.url)
+    await ctx.respond(embed=embed)
+
+@bot.slash_command(name="pay", description=f"Share your story by sending {CURRENCY_NAME}s to another.")
+async def pay(ctx: discord.ApplicationContext, recipient: discord.Option(discord.Member, "The Incarnation to receive your story."), amount: discord.Option(int, "The amount of Coin to send.")):
+    sender = ctx.author
+    if amount <= 0:
+        return await ctx.respond("A story's value must be positive.", ephemeral=True)
+    if recipient.bot:
+        return await ctx.respond("Dokkaebi do not trade in mortal currency.", ephemeral=True)
+    if recipient.id == sender.id:
+        return await ctx.respond("You cannot write a story for yourself.", ephemeral=True)
+
+    if await db.transfer_coins(sender.id, recipient.id, amount):
+        embed = EmbedFactory.create(
+            title="「Fable Weaving」",
+            description=f"A new story has been woven. You sent **{amount:,} {CURRENCY_SYMBOL}** to {recipient.mention}.",
+            color=discord.Color.green()
+        )
+        await ctx.respond(embed=embed)
+        
+        log_embed = EmbedFactory.create(
+            title="Akashic Record: Coin Transfer",
+            description=f"A story was shared between two Incarnations.",
+            color=discord.Color.from_rgb(100, 150, 255),
+            timestamp=discord.utils.utcnow()
+        )
+        log_embed.add_field(name="Sender", value=f"{sender.mention} (`{sender.id}`)", inline=True)
+        log_embed.add_field(name="Recipient", value=f"{recipient.mention} (`{recipient.id}`)", inline=True)
+        log_embed.add_field(name="Amount", value=f"**{amount:,} {CURRENCY_SYMBOL}**", inline=False)
+        await send_log(log_embed)
+    else:
+        balance = await db.get_balance(sender.id)
+        embed = EmbedFactory.create(
+            title="「Transaction Failed」",
+            description=f"Your Fable is insufficient. You only possess **{balance:,} {CURRENCY_SYMBOL}**.",
+            color=discord.Color.red()
+        )
+        await ctx.respond(embed=embed, ephemeral=True)
+
+@bot.slash_command(name="leaderboard", description="View the Ranking Scenario for the wealthiest Incarnations.")
+async def leaderboard(ctx: discord.ApplicationContext):
+    top_users = await db.get_leaderboard(limit=10)
+    embed = EmbedFactory.create(
+        title="🏆「The Throne of the Absolute」🏆",
+        color=discord.Color.blurple()
+    )
+    if not top_users:
+        embed.description = "The ranking is currently empty. No great Fables have been told."
+        return await ctx.respond(embed=embed)
+    
+    desc = []
+    for rank, record in enumerate(top_users, 1):
+        try:
+            user = bot.get_user(record['user_id']) or await bot.fetch_user(record['user_id'])
+            user_display = user.mention
+        except discord.NotFound:
+            user_display = f"An Forgotten Incarnation (ID: {record['user_id']})"
+        
+        emoji = "🥇" if rank == 1 else "🥈" if rank == 2 else "🥉" if rank == 3 else f"**#{rank}**"
+        desc.append(f"{emoji} {user_display} — **{record['balance']:,} {CURRENCY_SYMBOL}**")
+        
+    embed.description = "\n".join(desc)
+    await ctx.respond(embed=embed)
+
+# --- CONSTELLATION COMMANDS ---
+constellation_cmds = SlashCommandGroup("constellation", "Commands for managing the Star Stream.", guild_ids=[MAIN_GUILD_ID])
+
+@constellation_cmds.command(
+    name="generate",
+    description=f"Bestow a Revelation of {CURRENCY_NAME}s."
+)
+@commands.cooldown(1, 60, commands.BucketType.user)
+async def generate(ctx: discord.ApplicationContext, amount: discord.Option(int, "The amount of the Revelation."), recipient: discord.Option(discord.Member, "The Incarnation to be blessed.")):
+    if not is_constellation(ctx):
+        return await ctx.respond("The Star Stream does not recognize your Modifier.", ephemeral=True)
+    if amount <= 0:
+        return await ctx.respond("A Revelation must have substance.", ephemeral=True)
+        
+    await db.add_coins(recipient.id, amount)
+    
+    embed = EmbedFactory.create(
+        title="「Myth-Grade Fable Genesis」",
+        description=f"The Constellation {ctx.author.mention} has bestowed a Revelation upon {recipient.mention}, granting them **{amount:,} {CURRENCY_SYMBOL}**.",
+        color=discord.Color.from_rgb(0, 255, 255)
+    )
+    await ctx.respond(embed=embed)
+
+    log_embed = EmbedFactory.create(
+        title="Akashic Record: Coin Generation",
+        description="A Constellation has altered the narrative.",
+        color=discord.Color.from_rgb(0, 255, 255),
+        timestamp=discord.utils.utcnow()
+    )
+    log_embed.add_field(name="Constellation", value=f"{ctx.author.mention} (`{ctx.author.id}`)", inline=True)
+    log_embed.add_field(name="Recipient", value=f"{recipient.mention} (`{recipient.id}`)", inline=True)
+    log_embed.add_field(name="Amount Generated", value=f"**{amount:,} {CURRENCY_SYMBOL}**", inline=False)
+    await send_log(log_embed)
+
+@generate.error
+async def generate_error(ctx: discord.ApplicationContext, error: discord.DiscordException):
+    if isinstance(error, commands.CommandOnCooldown):
+        await ctx.respond(f"Your Stigma is on cooldown. Try again in {error.retry_after:.2f} seconds.", ephemeral=True)
+
+# [NEW COMMAND]
+@constellation_cmds.command(
+    name="confiscate",
+    description=f"Judge an Incarnation and confiscate their {CURRENCY_NAME}s."
+)
+async def confiscate(ctx: discord.ApplicationContext, amount: discord.Option(int, "The amount of Coin to confiscate."), recipient: discord.Option(discord.Member, "The Incarnation to be judged.")):
+    if not is_constellation(ctx):
+        return await ctx.respond("The Star Stream does not recognize your Modifier.", ephemeral=True)
+    if amount <= 0:
+        return await ctx.respond("A Judgment must have substance. The amount must be positive.", ephemeral=True)
+
+    current_balance = await db.get_balance(recipient.id)
+    
+    # Prevent negative balances. If confiscating more than they have, just take it all.
+    amount_to_remove = min(amount, current_balance)
+
+    await db.add_coins(recipient.id, -amount_to_remove)
+    
+    embed = EmbedFactory.create(
+        title="「Probability Adjustment」",
+        description=f"The Constellation {ctx.author.mention} has passed Judgment upon {recipient.mention}, confiscating **{amount_to_remove:,} {CURRENCY_SYMBOL}**.",
+        color=discord.Color.dark_red()
+    )
+    await ctx.respond(embed=embed)
+
+    log_embed = EmbedFactory.create(
+        title="Akashic Record: Coin Confiscation",
+        description="A Constellation has adjusted an Incarnation's Fable.",
+        color=discord.Color.dark_red(),
+        timestamp=discord.utils.utcnow()
+    )
+    log_embed.add_field(name="Constellation", value=f"{ctx.author.mention} (`{ctx.author.id}`)", inline=True)
+    log_embed.add_field(name="Incarnation Judged", value=f"{recipient.mention} (`{recipient.id}`)", inline=True)
+    log_embed.add_field(name="Amount Confiscated", value=f"**{amount_to_remove:,} {CURRENCY_SYMBOL}**", inline=False)
+    await send_log(log_embed)
+
+bot.add_application_command(constellation_cmds)
+
+# --- DOKKAEBI BAG (SHOP) COMMANDS ---
+shop = SlashCommandGroup("shop", "Commands for the Dokkaebi Bag.")
+
+@shop.command(name="add", description="[CONSTELLATION] Place a new Artifact in the Dokkaebi Bag.")
+async def shop_add(ctx: discord.ApplicationContext,
+                   name: discord.Option(str, "The unique name of the Artifact."),
+                   cost: discord.Option(int, f"The price in {CURRENCY_SYMBOL}."),
+                   reward_role: discord.Option(discord.Role, "The Stigma (Role) a user gets for buying this."),
+                   one_time_buy: discord.Option(bool, "Is this a unique Artifact?"),
+                   image_file: discord.Option(discord.Attachment, "Upload an image for the Artifact.", required=False)):
+    if not is_constellation(ctx):
+        return await ctx.respond("Only Constellations may stock the Dokkaebi Bag.", ephemeral=True)
+    if not ctx.guild:
+        return await ctx.respond("This Scenario can only be performed in a guild.", ephemeral=True)
+    if cost <= 0:
+        return await ctx.respond("Artifacts must have a positive cost.", ephemeral=True)
+
+    image_url = image_file.url if image_file else None
+
+    if await db.add_shop_item(ctx.guild.id, name, cost, reward_role.id, image_url, one_time_buy):
+        embed = EmbedFactory.create(
+            title="<Dokkaebi Bag Updated>",
+            description=f"The Artifact **{name}** is now for sale!",
+            color=discord.Color.blue()
+        )
+        embed.add_field(name="Cost", value=f"{cost:,} {CURRENCY_SYMBOL}", inline=True)
+        embed.add_field(name="Reward Stigma", value=reward_role.mention, inline=True)
+        if one_time_buy:
+            embed.add_field(name="Type", value="Hidden Piece (Unique)")
+        if image_url:
+            embed.set_thumbnail(url=image_url)
+        await ctx.respond(embed=embed)
+        
+        log_embed = EmbedFactory.create(
+            title="Akashic Record: Artifact Added",
+            color=discord.Color.blue(),
+            timestamp=discord.utils.utcnow(),
+            author_name=f"Stocked by: {ctx.author.display_name}",
+            author_icon=ctx.author.display_avatar.url
+        )
+        log_embed.add_field(name="Artifact Name", value=name, inline=True)
+        log_embed.add_field(name="Cost", value=f"{cost:,} {CURRENCY_SYMBOL}", inline=True)
+        log_embed.add_field(name="Reward Stigma", value=reward_role.mention, inline=False)
+        log_embed.add_field(name="Is Unique?", value=str(one_time_buy), inline=True)
+        await send_log(log_embed)
+    else:
+        await ctx.respond(f"An Artifact with the name '{name}' already exists in this channel.", ephemeral=True)
+
+@shop.command(name="view", description="Peer into the Dokkaebi Bag.")
+async def shop_view(ctx: discord.ApplicationContext):
+    if not ctx.guild:
+        return await ctx.respond("The Dokkaebi Bag only opens within a guild.", ephemeral=True)
+    items = await db.get_all_shop_items(ctx.guild.id)
+    # [BUG FIX] The embed is now created correctly without a description, which is added later.
+    embed = EmbedFactory.create(
+        title=f"「{ctx.guild.name}'s Dokkaebi Bag」",
+        color=discord.Color.dark_magenta()
+    )
+    if not items:
+        embed.description = "The Bag is currently empty. A Constellation must add Artifacts."
+    else:
+        desc = []
+        for item in items:
+            role = ctx.guild.get_role(item['role_id'])
+            item_line = f"### {item['name']}\n"
+            item_line += f"**Cost:** {item['cost']:,} {CURRENCY_SYMBOL}\n"
+            item_line += f"**Reward:** {role.mention if role else '`Faded Stigma`'}\n"
+            if item['is_one_time_buy']:
+                if item['purchased_by_user_id']:
+                    try:
+                        purchaser = bot.get_user(item['purchased_by_user_id']) or await bot.fetch_user(item['purchased_by_user_id'])
+                        purchaser_mention = purchaser.mention
+                    except discord.NotFound:
+                        purchaser_mention = f"Forgotten Incarnation (ID: {item['purchased_by_user_id']})"
+                    item_line += f"**Status:** 🔴 CLAIMED (by {purchaser_mention})\n"
+                else:
+                    item_line += "**Type:** ✨ Hidden Piece (Unique)\n"
+            desc.append(item_line)
+        embed.description = "\n".join(desc)
+    await ctx.respond(embed=embed)
+
+@shop.command(name="buy", description="Make a contract to buy an Artifact.")
+async def shop_buy(ctx: discord.ApplicationContext, name: discord.Option(str, "The name of the Artifact to buy.", autocomplete=autocomplete_shop_items)):
+    if not ctx.guild:
+        return await ctx.respond("Contracts can only be made in a guild.", ephemeral=True)
+    item = await db.get_shop_item(ctx.guild.id, name)
+    if not item:
+        return await ctx.respond(f"The Star Stream cannot find an Artifact named '{name}'.", ephemeral=True)
+    if item['is_one_time_buy'] and item['purchased_by_user_id']:
+        return await ctx.respond("This Hidden Piece has already been claimed by another Incarnation.", ephemeral=True)
+
+    user_balance = await db.get_balance(ctx.author.id)
+    if user_balance < item['cost']:
+        return await ctx.respond(f"Your Fable is insufficient. You need **{item['cost']:,} {CURRENCY_SYMBOL}** but only have **{user_balance:,}**.", ephemeral=True)
+
+    role_to_grant = ctx.guild.get_role(item['role_id'])
+    if not role_to_grant:
+        return await ctx.respond("Error: The promised Stigma has faded from this world.", ephemeral=True)
+    if role_to_grant in ctx.author.roles:
+        return await ctx.respond("You already possess this Stigma.", ephemeral=True)
+    if not ctx.guild.me.guild_permissions.manage_roles:
+        return await ctx.respond("Bot Error: This Dokkaebi lacks the `Manage Roles` permission to grant Stigmas.", ephemeral=True)
+    if role_to_grant.position >= ctx.guild.me.top_role.position:
+        return await ctx.respond("Bot Error: This Dokkaebi cannot grant a Stigma that is higher than its own station.", ephemeral=True)
+
+    try:
+        # Perform transaction
+        await db.add_coins(ctx.author.id, -item['cost'])
+        await ctx.author.add_roles(role_to_grant, reason=f"Purchased Artifact '{item['name']}'")
+        if item['is_one_time_buy']:
+            await db.mark_item_as_purchased(item['item_id'], ctx.author.id)
+        
+        embed = EmbedFactory.create(
+            title="「Contract Fulfilled」",
+            description=f"You acquired the Artifact **{item['name']}** for **{item['cost']:,} {CURRENCY_SYMBOL}**.",
+            color=discord.Color.green()
+        )
+        embed.add_field(name="Stigma Acquired", value=f"You have been granted the {role_to_grant.mention} Stigma!")
+        if item['image_url']: embed.set_thumbnail(url=item['image_url'])
+        await ctx.respond(embed=embed)
+
+        # --- Logging ---
+        log_embed = EmbedFactory.create(
+            title="Akashic Record: Artifact Purchase",
+            color=discord.Color.purple(),
+            timestamp=discord.utils.utcnow()
+        )
+        log_embed.add_field(name="Incarnation", value=f"{ctx.author.mention} (`{ctx.author.id}`)", inline=False)
+        log_embed.add_field(name="Artifact", value=item['name'], inline=True)
+        log_embed.add_field(name="Cost", value=f"**{item['cost']:,} {CURRENCY_SYMBOL}**", inline=True)
+        await send_log(log_embed)
+        
+    except Exception as e:
+        print(f"An error occurred during purchase, refunding user. Error: {e}")
+        await ctx.respond("A fatal error occurred in the Star Stream. The contract has been voided and your Coins returned.", ephemeral=True)
+        await db.add_coins(ctx.author.id, item['cost']) # Refund on any failure
+
+@shop.command(name="remove", description="[CONSTELLATION] Remove an Artifact from the Dokkaebi Bag.")
+async def shop_remove(ctx: discord.ApplicationContext, name: discord.Option(str, "The name of the Artifact to remove.", autocomplete=autocomplete_shop_items)):
+    if not is_constellation(ctx):
+        return await ctx.respond("Only Constellations may alter the Dokkaebi Bag's contents.", ephemeral=True)
+    if not ctx.guild:
+        return await ctx.respond("This Scenario can only be performed in a guild.", ephemeral=True)
+    
+    if await db.remove_shop_item(ctx.guild.id, name):
+        embed = EmbedFactory.create(
+            title="<Artifact Removed>",
+            description=f"Removed **{name}** from the Dokkaebi Bag.",
+            color=discord.Color.orange()
+        )
+        await ctx.respond(embed=embed)
+        
+        log_embed = EmbedFactory.create(
+            title="Akashic Record: Artifact Removed",
+            color=discord.Color.orange(),
+            timestamp=discord.utils.utcnow(),
+            author_name=f"Removed by: {ctx.author.display_name}",
+            author_icon=ctx.author.display_avatar.url
+        )
+        log_embed.add_field(name="Artifact Name", value=name, inline=False)
+        await send_log(log_embed)
+    else:
+        await ctx.respond(f"Could not find an Artifact named '{name}'.", ephemeral=True)
+
+bot.add_application_command(shop)
+
+# Run the bot
+if __name__ == "__main__":
+    if not BOT_TOKEN:
+        print("Fatal Error: DISCORD_TOKEN not found in .env file. The Star Stream cannot connect.")
+    else:
+        bot.run(BOT_TOKEN)
