@@ -28,13 +28,13 @@ except (TypeError, ValueError):
     print("WARNING: ADMIN_LOG_CHANNEL_ID not found or invalid in .env file. Admin channel logging is disabled.")
 
 
-CONSTELLATION_USER_IDS = [1374059561417441324, 1072508556907139133] # Replace with your admin user IDs
-CONSTELLATION_ROLE_IDS = [1382423081565425694, 1382422834965385318] # Replace with your admin role IDs
+CONSTELLATION_USER_IDS = [1072508556907139133] # Replace with your admin user IDs
+CONSTELLATION_ROLE_IDS = [1382715685276221483] # Replace with your admin role IDs
 
 CURRENCY_NAME = "Starstream Coin"
 CURRENCY_SYMBOL = "SSC"
 
-MAIN_GUILD_ID = 1382416574811734190 # Replace with your main guild ID
+MAIN_GUILD_ID = 1369930083564912670 # Replace with your main guild ID
 # --- END CONFIGURATION ---
 
 # --- BOT SETUP ---
