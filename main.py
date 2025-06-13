@@ -1,4 +1,3 @@
-
 import os
 import discord
 from discord.commands import SlashCommandGroup
@@ -254,6 +253,36 @@ async def handle_grr_bet(message: discord.Message, args: list):
                 f"**Profit/Loss:** {profit:+,} GRR | **New Balance:** {new_balance:,} GRR")
     await message.channel.send(response, reference=message)
 
+# --- NEW GRR LEADERBOARD COMMAND ---
+async def handle_grr_leaderboard(message: discord.Message, args: list):
+    """Handles the GRR coin leaderboard command."""
+    # This command assumes a `get_grr_leaderboard` function exists in `database.py`
+    top_users = await db.get_grr_leaderboard(limit=10)
+    
+    if not top_users:
+        return await message.channel.send("There are no GRR hoarders yet. The leaderboard is empty.", reference=message)
+
+    title = "🏆 **GRR Coin Leaderboard** 🏆\n"
+    leaderboard_lines = []
+    
+    for rank, record in enumerate(top_users, 1):
+        try:
+            user = bot.get_user(record['user_id']) or await bot.fetch_user(record['user_id'])
+            # Using display_name to avoid pinging everyone on the leaderboard
+            user_display = user.display_name
+        except discord.NotFound:
+            user_display = f"Forgotten User (ID: {record['user_id']})"
+            
+        emoji = ""
+        if rank == 1: emoji = "🥇"
+        elif rank == 2: emoji = "🥈"
+        elif rank == 3: emoji = "🥉"
+        else: emoji = f"**#{rank}**"
+            
+        leaderboard_lines.append(f"{emoji} {user_display} - **{record['balance']:,}** GRR")
+        
+    response = title + "\n".join(leaderboard_lines)
+    await message.channel.send(response, reference=message)
 
 async def handle_grr_pay(message: discord.Message, args: list):
     """Handles paying another user with GRR coins."""
@@ -330,6 +359,7 @@ async def on_message(message: discord.Message):
             'exchange': handle_grr_exchange,
             'cf': handle_grr_cf,
             'bet': handle_grr_bet,
+            'leaderboard': handle_grr_leaderboard, 'lb': handle_grr_leaderboard,
             'pay': handle_grr_pay, 'give': handle_grr_pay, 'payment': handle_grr_pay,
             'set-winrate': handle_grr_set_winrate,
         }
@@ -343,7 +373,7 @@ async def on_message(message: discord.Message):
         else:
             await message.channel.send(f"Unknown subcommand `{subcommand}` for `grr`.", reference=message, delete_after=10)
     elif command == 'grr':
-         await message.channel.send(f"Please specify a subcommand. Choices: `cash`, `daily`, `exchange`, `cf`, `bet`, `pay`", reference=message)
+         await message.channel.send(f"Please specify a subcommand. Choices: `cash`, `daily`, `exchange`, `cf`, `bet`, `pay`, `leaderboard`", reference=message)
 
 
 # --- AUTOCOMPLETE ---
