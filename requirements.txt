@@ -1,4 +1,6 @@
-py-cord
 python-dotenv
-aiosqlite
+py-cord
 aiohttp
+aiohttp-session[secure]
+bcrypt
+aiosqlite

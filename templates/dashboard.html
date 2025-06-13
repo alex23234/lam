@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard - Star Stream Admin</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <nav class="navbar">
+        <div class="nav-brand">Star Stream Admin</div>
+        <ul class="nav-links">
+            <li><a href="/" class="active">Dashboard</a></li>
+            <li><a href="/users">Users</a></li>
+            <li><a href="/shop">Shop</a></li>
+            <li><a href="/settings">Settings</a></li>
+            <li><a href="/logout">Logout</a></li>
+        </ul>
+    </nav>
+    <main class="container">
+        <h1>Akashic Records (Live Logs)</h1>
+        <div id="log-container">
+            {{ log_entries }}
+        </div>
+    </main>
+    <script>
+        const logContainer = document.getElementById('log-container');
+        const ws = new WebSocket(`ws://${window.location.host}/ws/logs`);
+
+        ws.onmessage = function(event) {
+            const data = JSON.parse(event.data);
+            if (data.type === 'log') {
+                const logEntry = document.createElement('div');
+                logEntry.className = 'log-entry';
+                logEntry.innerHTML = data.payload;
+                logContainer.prepend(logEntry);
+                while (logContainer.children.length > 200) {
+                    logContainer.removeChild(logContainer.lastChild);
+                }
+            }
+        };
+
+        ws.onclose = function() {
+            console.log('WebSocket connection closed. Attempting to reconnect in 5 seconds...');
+            setTimeout(() => { window.location.reload(); }, 5000);
+        };
+    </script>
+</body>
+</html>

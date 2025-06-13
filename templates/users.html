@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>User Management - Star Stream Admin</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <nav class="navbar">
+        <div class="nav-brand">Star Stream Admin</div>
+        <ul class="nav-links">
+            <li><a href="/">Dashboard</a></li>
+            <li><a href="/users" class="active">Users</a></li>
+            <li><a href="/shop">Shop</a></li>
+            <li><a href="/settings">Settings</a></li>
+            <li><a href="/logout">Logout</a></li>
+        </ul>
+    </nav>
+    <main class="container">
+        <h1>User Management</h1>
+        <div class="toolbar">
+            <form method="GET" action="/users">
+                <input type="search" name="q" placeholder="Search by name or ID..." value="{{ query }}">
+                <button type="submit">Search</button>
+            </form>
+            <button id="save-all-btn">Save All Changes</button>
+        </div>
+        <table>
+            <thead>
+                <tr>
+                    <th>User ID</th>
+                    <th>Name</th>
+                    <th>SSC Balance</th>
+                    <th>GRR Balance</th>
+                </tr>
+            </thead>
+            <tbody>
+                {{ user_rows }}
+            </tbody>
+        </table>
+    </main>
+    <script>
+        document.getElementById('save-all-btn').addEventListener('click', async () => {
+            const inputs = document.querySelectorAll('.coin-input.changed');
+            if (inputs.length === 0) {
+                alert('No changes to save.');
+                return;
+            }
+
+            const updatesByUsers = {};
+            inputs.forEach(input => {
+                const userId = input.dataset.userid;
+                if (!updatesByUsers[userId]) {
+                    const row = input.closest('tr');
+                    updatesByUsers[userId] = {
+                        ssc: row.querySelector('[data-currency="ssc"]').value,
+                        grr: row.querySelector('[data-currency="grr"]').value
+                    };
+                }
+            });
+
+            let successCount = 0;
+            for (const [userId, balances] of Object.entries(updatesByUsers)) {
+                try {
+                    const response = await fetch('/api/users/update', {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({
+                            user_id: userId,
+                            ssc: balances.ssc,
+                            grr: balances.grr
+                        })
+                    });
+                    if (response.ok) {
+                        successCount++;
+                    } else {
+                        throw new Error('Server returned an error.');
+                    }
+                } catch (err) {
+                    console.error(`Failed to update user ${userId}:`, err);
+                    alert(`Failed to update user ${userId}. Check console for details.`);
+                }
+            }
+
+            alert(`Successfully saved changes for ${successCount} user(s). Page will now reload.`);
+            window.location.reload();
+        });
+
+        document.querySelectorAll('.coin-input').forEach(input => {
+            input.addEventListener('input', () => {
+                input.classList.add('changed');
+            });
+        });
+    </script>
+</body>
+</html>

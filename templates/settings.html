@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Settings - Star Stream Admin</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <nav class="navbar">
+        <div class="nav-brand">Star Stream Admin</div>
+        <ul class="nav-links">
+            <li><a href="/">Dashboard</a></li>
+            <li><a href="/users">Users</a></li>
+            <li><a href="/shop">Shop</a></li>
+            <li><a href="/settings" class="active">Settings</a></li>
+            <li><a href="/logout">Logout</a></li>
+        </ul>
+    </nav>
+    <main class="container">
+        <h1>Probability Settings</h1>
+        <div class="card">
+            <p>Adjust the win rates for the GRR coin games. Enter values as percentages (e.g., 31.5 for 31.5%).</p>
+            <div class="form-grid">
+                <label for="cf-win-rate">Coinflip (grr cf) Win Rate (%)</label>
+                <input type="number" step="0.01" id="cf-win-rate" value="{{ cf_win_rate }}">
+
+                <label for="bet-win-rate">High-Stakes (grr bet) Win Rate (%)</label>
+                <input type="number" step="0.01" id="bet-win-rate" value="{{ bet_win_rate }}">
+            </div>
+            <button id="save-settings-btn">Save Settings</button>
+        </div>
+    </main>
+    <script>
+        document.getElementById('save-settings-btn').addEventListener('click', async () => {
+            const payload = {
+                cf_win_rate: document.getElementById('cf-win-rate').value,
+                bet_win_rate: document.getElementById('bet-win-rate').value
+            };
+            try {
+                const response = await fetch('/api/settings/update', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify(payload)
+                });
+                if (!response.ok) throw new Error('Server returned an error.');
+                alert('Settings saved successfully!');
+            } catch (err) {
+                alert('Failed to save settings. Check console for details.');
+                console.error(err);
+            }
+        });
+    </script>
+</body>
+</html>
