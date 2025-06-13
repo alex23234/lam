@@ -1,3 +1,4 @@
+
 import os
 import discord
 from discord.commands import SlashCommandGroup
@@ -155,34 +156,33 @@ async def handle_grr_daily(message: discord.Message, args: list):
         response = "🚫 You've already claimed your daily GRR coins. Come back tomorrow!"
         await message.channel.send(response, reference=message, delete_after=10)
 
+# --- MODIFICATION START: Disable grr exchange ---
 async def handle_grr_exchange(message: discord.Message, args: list):
-    grr_balance = await db.get_grr_balance(message.author.id)
-    if grr_balance < 5000:
-        response = f"💰 Exchange Failed: You need **5,000** GRR to exchange. You only have **{grr_balance:,}** GRR."
-        return await message.channel.send(response, reference=message)
+    await message.channel.send("The GRR to SSC exchange is temporarily disabled due to market instability.", reference=message)
+    return
+# --- MODIFICATION END ---
 
-    if await db.exchange_grr_for_ssc(message.author.id):
-        new_grr = await db.get_grr_balance(message.author.id)
-        new_ssc = await db.get_balance(message.author.id)
-        response = (f"✨ Miraculous Exchange! ✨ {message.author.mention} has exchanged **5,000** GRR for **100** {CURRENCY_SYMBOL}!\n"
-                    f"New Balances -> GRR: **{new_grr:,}** | {CURRENCY_SYMBOL}: **{new_ssc:,}**")
-        await message.channel.send(response, reference=message)
-
+# --- MODIFICATION START: Add 'all' subcommand to grr cf ---
 async def handle_grr_cf(message: discord.Message, args: list):
-    """Handles the coin flip command. `grr cf <amount> [t]`"""
+    """Handles the coin flip command. `grr cf <amount|all> [t]`"""
     if not args:
-        return await message.channel.send("Please specify an amount to bet! Usage: `grr cf <amount> [t for tails]`", reference=message)
+        return await message.channel.send("Please specify an amount to bet! Usage: `grr cf <amount|all> [t for tails]`", reference=message)
 
     choice = "Tails" if len(args) > 1 and args[1].lower() == 't' else "Heads"
-
-    try:
-        bet_amount = int(args[0])
-        if bet_amount <= 0:
-            return await message.channel.send("You must bet a positive amount of GRR coins.", reference=message)
-    except ValueError:
-        return await message.channel.send(f"'{args[0]}' is not a valid number. Usage: `grr cf <amount> [t for tails]`", reference=message)
-
     balance = await db.get_grr_balance(message.author.id)
+
+    if args[0].lower() == 'all':
+        if balance <= 0:
+            return await message.channel.send("You have no GRR coins to bet!", reference=message)
+        bet_amount = balance
+    else:
+        try:
+            bet_amount = int(args[0])
+            if bet_amount <= 0:
+                return await message.channel.send("You must bet a positive amount of GRR coins.", reference=message)
+        except ValueError:
+            return await message.channel.send(f"'{args[0]}' is not a valid number. Usage: `grr cf <amount|all> [t for tails]`", reference=message)
+
     if balance < bet_amount:
         return await message.channel.send(f"You can't bet **{bet_amount:,}** GRR, you only have **{balance:,}**.", reference=message)
 
@@ -206,6 +206,7 @@ async def handle_grr_cf(message: discord.Message, args: list):
     new_balance = await db.get_grr_balance(message.author.id)
     final_response = f"{message.author.mention}, {outcome_desc}\nYour new balance is **{new_balance:,}** GRR."
     await initial_msg.edit(content=final_response)
+# --- MODIFICATION END ---
 
 
 async def handle_grr_bet(message: discord.Message, args: list):
