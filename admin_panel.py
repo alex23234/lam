@@ -7,6 +7,7 @@ from aiohttp_session.cookie_storage import EncryptedCookieStorage
 import bcrypt
 import json
 from cryptography import fernet
+import html
 
 # Local imports
 import database as db
@@ -192,13 +193,22 @@ async def get_settings(request: web.Request):
     context = {
         'cf_win_rate': float(configs.get('cf_win_rate', 0.31)) * 100,
         'bet_win_rate': float(configs.get('bet_win_rate', 0.29)) * 100,
+        'exchange_enabled_checked': 'checked' if configs.get('exchange_enabled', 'false') == 'true' else '',
+        'exchange_disabled_message': html.escape(configs.get('exchange_disabled_message', 'The exchange is currently disabled.')),
+        'exchange_grr_cost': configs.get('exchange_grr_cost', '5000'),
+        'exchange_ssc_reward': configs.get('exchange_ssc_reward', '100'),
     }
     with open('./templates/settings.html', 'r', encoding='utf-8') as f:
         html_content = f.read()
 
     response_html = (html_content
         .replace("{{ cf_win_rate }}", f"{context['cf_win_rate']:.2f}")
-        .replace("{{ bet_win_rate }}", f"{context['bet_win_rate']:.2f}"))
+        .replace("{{ bet_win_rate }}", f"{context['bet_win_rate']:.2f}")
+        .replace("{{ exchange_enabled_checked }}", context['exchange_enabled_checked'])
+        .replace("{{ exchange_disabled_message }}", context['exchange_disabled_message'])
+        .replace("{{ exchange_grr_cost }}", context['exchange_grr_cost'])
+        .replace("{{ exchange_ssc_reward }}", context['exchange_ssc_reward'])
+    )
     return web.Response(text=response_html, content_type='text/html')
 
 async def post_update_settings(request: web.Request):
@@ -208,6 +218,12 @@ async def post_update_settings(request: web.Request):
         bet_rate = float(data['bet_win_rate']) / 100.0
         await db.set_config_value('cf_win_rate', str(cf_rate))
         await db.set_config_value('bet_win_rate', str(bet_rate))
+
+        await db.set_config_value('exchange_enabled', str(data['exchange_enabled']).lower())
+        await db.set_config_value('exchange_disabled_message', data['exchange_disabled_message'])
+        await db.set_config_value('exchange_grr_cost', str(int(data['exchange_grr_cost'])))
+        await db.set_config_value('exchange_ssc_reward', str(int(data['exchange_ssc_reward'])))
+
         return web.json_response({'status': 'success'})
     except Exception as e:
         return web.json_response({'status': 'error', 'message': str(e)}, status=500)
@@ -224,24 +240,19 @@ async def websocket_handler(request):
         active_websockets.remove(ws)
     return ws
 
-# --- App Setup and Runner (CORRECTED) ---
+# --- App Setup and Runner ---
 async def start_admin_panel_server(bot_instance, log_cache):
     global BOT_INSTANCE, LOG_CACHE
     BOT_INSTANCE = bot_instance
     LOG_CACHE = log_cache
     
-    # --- FIX IS HERE ---
-    # 1. Create the application WITHOUT the middleware first
     app = web.Application() 
     
-    # 2. Setup the session storage on the app. This adds the session middleware.
     fernet_key = fernet.Fernet.generate_key()
     f = fernet.Fernet(fernet_key)
     setup_session(app, EncryptedCookieStorage(f))
 
-    # 3. NOW, add your custom middleware. It will run after the session middleware.
     app.middlewares.append(auth_middleware)
-    # --- END FIX ---
 
     # Add routes and static files
     app.router.add_static('/static', path='./static', name='static')

@@ -128,6 +128,13 @@ async def get_leaderboard(limit: int = 10) -> List[Dict[str, Any]]:
         async with db.execute("SELECT user_id, balance FROM users ORDER BY balance DESC LIMIT ?", (limit,)) as cursor:
             return [dict(row) for row in await cursor.fetchall()]
 
+async def get_grr_leaderboard(limit: int = 10) -> List[Dict[str, Any]]:
+    """Gets the top N users by GRR balance."""
+    async with aiosqlite.connect(DB_FILE) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute("SELECT user_id, balance FROM grr_users WHERE balance > 0 ORDER BY balance DESC LIMIT ?", (limit,)) as cursor:
+            return [dict(row) for row in await cursor.fetchall()]
+
 async def get_all_users_combined() -> List[Dict[str, Any]]:
     """Gets all users from both currency systems, providing a comprehensive view."""
     async with aiosqlite.connect(DB_FILE) as db:
@@ -177,10 +184,10 @@ async def claim_daily_grr(user_id: int, amount_to_add: int) -> str:
             await cursor.execute("SELECT last_daily FROM grr_users WHERE user_id = ?", (user_id,))
             result = await cursor.fetchone()
             last_claim_date = result[0] if result else None
-            
+
             if last_claim_date == today_str:
                 return "already_claimed"
-            
+
             await cursor.execute(
                 "UPDATE grr_users SET balance = balance + ?, last_daily = ? WHERE user_id = ?",
                 (amount_to_add, today_str, user_id)
@@ -188,21 +195,29 @@ async def claim_daily_grr(user_id: int, amount_to_add: int) -> str:
             await db.commit()
             return "success"
 
-async def exchange_grr_for_ssc(user_id: int) -> bool:
+async def perform_grr_ssc_exchange(user_id: int, grr_cost: int, ssc_reward: int) -> bool:
     """
-    Exchanges 5000 GRR for 100 SSC in a single transaction.
-    Returns True on success, False on failure.
+    Atomically exchanges a specified amount of GRR for SSC.
+    Returns True on success, False on failure (e.g., insufficient funds).
     """
     async with aiosqlite.connect(DB_FILE) as db:
-        current_grr_balance = await get_grr_balance(user_id)
-        if current_grr_balance < 5000:
-            return False
-            
         async with db.cursor() as cursor:
-            await _get_or_create_user(cursor, user_id) # Ensure user exists in SSC table
-            await cursor.execute("UPDATE grr_users SET balance = balance - 5000 WHERE user_id = ?", (user_id,))
-            await cursor.execute("UPDATE users SET balance = balance + 100 WHERE user_id = ?", (user_id,))
-        
+            # Get current GRR balance
+            await _get_or_create_grr_user(cursor, user_id)
+            await cursor.execute("SELECT balance FROM grr_users WHERE user_id = ?", (user_id,))
+            result = await cursor.fetchone()
+            current_grr_balance = result[0] if result else 0
+
+            if current_grr_balance < grr_cost:
+                return False
+
+            # Ensure user exists in SSC table before adding to them
+            await _get_or_create_user(cursor, user_id)
+
+            # Perform the exchange
+            await cursor.execute("UPDATE grr_users SET balance = balance - ? WHERE user_id = ?", (grr_cost, user_id))
+            await cursor.execute("UPDATE users SET balance = balance + ? WHERE user_id = ?", (ssc_reward, user_id))
+
         await db.commit()
         return True
 
@@ -246,7 +261,7 @@ async def update_shop_item(item_id: int, updates: Dict[str, Any]):
             if key in ['name', 'cost', 'role_id', 'image_url', 'is_one_time_buy']:
                 fields.append(f"{key} = ?")
                 values.append(value)
-        
+
         if not fields:
             return
 
@@ -260,7 +275,7 @@ async def mark_item_as_purchased(item_id: int, user_id: int):
     async with aiosqlite.connect(DB_FILE) as db:
         await db.execute("UPDATE shop_items SET purchased_by_user_id = ? WHERE item_id = ?", (user_id, item_id))
         await db.commit()
-        
+
 async def remove_shop_item(guild_id: int, name: str) -> bool:
     """Removes an item from the shop by name. Returns True if an item was deleted."""
     async with aiosqlite.connect(DB_FILE) as db:

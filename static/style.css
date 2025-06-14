@@ -103,7 +103,7 @@ h1, h2 {
 }
 
 /* --- Forms & Inputs --- */
-input[type="text"], input[type="number"], input[type="password"], input[type="search"], select {
+input[type="text"], input[type="number"], input[type="password"], input[type="search"], select, textarea {
     width: 100%;
     padding: 10px;
     margin: 5px 0;
@@ -113,9 +113,19 @@ input[type="text"], input[type="number"], input[type="password"], input[type="se
     border-radius: 4px;
     color: var(--text-primary);
     font-size: 1em;
+    font-family: inherit;
+    resize: vertical;
 }
 
-input:focus, select:focus {
+input[type="checkbox"] {
+    width: auto;
+    justify-self: start;
+    align-self: center;
+    margin: 5px 0;
+}
+
+
+input:focus, select:focus, textarea:focus {
     outline: none;
     border-color: var(--accent-primary);
     box-shadow: 0 0 0 2px var(--accent-primary-faded, rgba(88, 101, 242, 0.3));
@@ -131,6 +141,7 @@ button {
     font-size: 1em;
     font-weight: 500;
     transition: background-color 0.2s;
+    margin-top: 10px;
 }
 
 button:hover {
@@ -150,6 +161,18 @@ button:hover {
     grid-template-columns: auto 1fr;
     gap: 15px;
     align-items: center;
+}
+
+.form-grid .sub-settings {
+    grid-column: 1 / -1;
+    display: grid;
+    grid-template-columns: subgrid;
+    gap: 15px;
+    padding-left: 15px;
+    margin-left: -15px;
+    border-left: 3px solid var(--border-color);
+    margin-top: 10px;
+    margin-bottom: 10px;
 }
 
 /* --- Tables --- */

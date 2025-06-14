@@ -18,8 +18,9 @@
         </ul>
     </nav>
     <main class="container">
-        <h1>Probability Settings</h1>
+        <h1>Game Settings</h1>
         <div class="card">
+            <h2>Probability Settings</h2>
             <p>Adjust the win rates for the GRR coin games. Enter values as percentages (e.g., 31.5 for 31.5%).</p>
             <div class="form-grid">
                 <label for="cf-win-rate">Coinflip (grr cf) Win Rate (%)</label>
@@ -28,14 +29,60 @@
                 <label for="bet-win-rate">High-Stakes (grr bet) Win Rate (%)</label>
                 <input type="number" step="0.01" id="bet-win-rate" value="{{ bet_win_rate }}">
             </div>
-            <button id="save-settings-btn">Save Settings</button>
         </div>
+
+        <div class="card">
+            <h2>GRR to SSC Exchange Settings</h2>
+            <div class="form-grid">
+                <label for="exchange-enabled">Enable Exchange</label>
+                <input type="checkbox" id="exchange-enabled" {{ exchange_enabled_checked }}>
+
+                <div id="exchange-enabled-settings" class="sub-settings">
+                    <label for="exchange-grr-cost">GRR Cost</label>
+                    <input type="number" id="exchange-grr-cost" value="{{ exchange_grr_cost }}">
+
+                    <label for="exchange-ssc-reward">SSC Reward</label>
+                    <input type="number" id="exchange-ssc-reward" value="{{ exchange_ssc_reward }}">
+                </div>
+
+                <div id="exchange-disabled-settings" class="sub-settings">
+                    <label for="exchange-disabled-message">Disabled Message</label>
+                    <textarea id="exchange-disabled-message" rows="3">{{ exchange_disabled_message }}</textarea>
+                </div>
+            </div>
+        </div>
+
+        <button id="save-settings-btn">Save All Settings</button>
     </main>
     <script>
+        // --- Exchange Settings Toggle ---
+        const exchangeEnabledCheckbox = document.getElementById('exchange-enabled');
+        const enabledSettingsDiv = document.getElementById('exchange-enabled-settings');
+        const disabledSettingsDiv = document.getElementById('exchange-disabled-settings');
+
+        function toggleExchangeSettings() {
+            if (exchangeEnabledCheckbox.checked) {
+                enabledSettingsDiv.style.display = 'grid';
+                disabledSettingsDiv.style.display = 'none';
+            } else {
+                enabledSettingsDiv.style.display = 'none';
+                disabledSettingsDiv.style.display = 'grid';
+            }
+        }
+        exchangeEnabledCheckbox.addEventListener('change', toggleExchangeSettings);
+        document.addEventListener('DOMContentLoaded', toggleExchangeSettings); // Run on page load
+
+        // --- Save Button ---
         document.getElementById('save-settings-btn').addEventListener('click', async () => {
             const payload = {
+                // Probability settings
                 cf_win_rate: document.getElementById('cf-win-rate').value,
-                bet_win_rate: document.getElementById('bet-win-rate').value
+                bet_win_rate: document.getElementById('bet-win-rate').value,
+                // Exchange settings
+                exchange_enabled: document.getElementById('exchange-enabled').checked,
+                exchange_disabled_message: document.getElementById('exchange-disabled-message').value,
+                exchange_grr_cost: document.getElementById('exchange-grr-cost').value,
+                exchange_ssc_reward: document.getElementById('exchange-ssc-reward').value
             };
             try {
                 const response = await fetch('/api/settings/update', {
@@ -43,7 +90,10 @@
                     headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify(payload)
                 });
-                if (!response.ok) throw new Error('Server returned an error.');
+                const result = await response.json();
+                if (!response.ok || result.status !== 'success') {
+                    throw new Error(result.message || 'Server returned an error.');
+                }
                 alert('Settings saved successfully!');
             } catch (err) {
                 alert('Failed to save settings. Check console for details.');
