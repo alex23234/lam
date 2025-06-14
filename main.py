@@ -103,7 +103,9 @@ async def send_log(embed: discord.Embed):
     
     html_log = "<br>".join(parts)
     LOG_CACHE.append(html_log)
-    await admin_panel.broadcast_log(html_log)
+    # The admin panel might not be running yet on initial startup logs
+    if admin_panel.BOT_INSTANCE:
+        await admin_panel.broadcast_log(html_log)
 
 async def send_purchase_log_to_constellations(embed: discord.Embed):
     for user_id in CONSTELLATION_USER_IDS:
@@ -310,6 +312,38 @@ async def handle_grr_slots(message: discord.Message, args: list):
 
     await initial_msg.edit(content=final_content)
 
+async def handle_grr_help(message: discord.Message, args: list):
+    """Displays the help message for all GRR commands."""
+    embed = discord.Embed(
+        title="GRR Command Guide",
+        description="Here are the available commands for the GRR coin system.",
+        color=discord.Color.gold()
+    )
+    user_commands = (
+        "`grr help` - Shows this message.\n"
+        "`grr cash [@user]` - Checks your or another user's GRR balance. (Alias: `bal`)\n"
+        "`grr daily` - Claims your daily random GRR coins.\n"
+        "`grr pay <@user> <amount>` - Pays another user. (Alias: `give`)\n"
+        "`grr leaderboard` - Shows the top 10 GRR holders. (Alias: `lb`)\n"
+        "`grr exchange` - Exchanges GRR for Starstream Coins (SSC)."
+    )
+    embed.add_field(name="📜 General Commands", value=user_commands, inline=False)
+    gambling_commands = (
+        "`grr cf <amount|all> [t]` - Flips a coin. Bet on heads (default) or tails (t).\n"
+        "`grr slots <amount|all>` - Plays the slot machine. (Alias: `slot`)\n"
+        "`grr bet <amount>` - Makes a high-risk, high-reward bet."
+    )
+    embed.add_field(name="🎲 Gambling Commands", value=gambling_commands, inline=False)
+    if is_constellation_from_message(message):
+        admin_commands = (
+            "`grr set-winrate <%> <cf|bet>` - Sets the win rate for coinflip or bet.\n"
+            "`grr toggle-exchange <on|off>` - Enables or disables the GRR-to-SSC exchange.\n"
+            "`grr set-exchange-rate <grr> <ssc>` - Sets the costs for the exchange.\n"
+            "`grr set-disabled-message <msg>` - Sets the message shown when the exchange is off."
+        )
+        embed.add_field(name="⚙️ Constellation Commands", value=admin_commands, inline=False)
+    embed.set_footer(text="Remember to use 'grr' before each command!")
+    await message.channel.send(embed=embed, reference=message)
 
 async def handle_grr_leaderboard(message: discord.Message, args: list):
     top_users = await db.get_grr_leaderboard(limit=10)
@@ -346,6 +380,8 @@ async def handle_grr_pay(message: discord.Message, args: list):
         response = f"🚫 Transfer Failed. You only have **{bal:,}** GRR."
         await message.channel.send(response, reference=message)
 
+# --- NEW/MODIFIED ADMIN HANDLERS FOR GRR COMMANDS ---
+
 async def handle_grr_set_winrate(message: discord.Message, args: list):
     if not is_constellation_from_message(message): return await message.channel.send("The Star Stream does not recognize your Modifier.", reference=message, delete_after=10)
     if len(args) < 2: return await message.channel.send("Usage: `grr set-winrate <percentage> <cf | bet>`", reference=message)
@@ -360,6 +396,43 @@ async def handle_grr_set_winrate(message: discord.Message, args: list):
     await db.set_config_value(f"{game}_win_rate", str(win_rate))
     await message.channel.send(f"⚙️ Probability Adjusted! The win rate for `{game}` is now **{percentage:.2f}%**.", reference=message)
 
+async def handle_grr_toggle_exchange(message: discord.Message, args: list):
+    if not is_constellation_from_message(message): return await message.channel.send("The Star Stream does not recognize your Modifier.", reference=message, delete_after=10)
+    if not args or args[0].lower() not in ['on', 'off']:
+        return await message.channel.send("Usage: `grr toggle-exchange <on|off>`", reference=message)
+    
+    is_enabled = args[0].lower() == 'on'
+    await db.set_config_value('exchange_enabled', str(is_enabled).lower())
+    status = "enabled" if is_enabled else "disabled"
+    await message.channel.send(f"⚙️ Exchange status has been set to **{status}**.", reference=message)
+
+async def handle_grr_set_exchange_rate(message: discord.Message, args: list):
+    if not is_constellation_from_message(message): return await message.channel.send("The Star Stream does not recognize your Modifier.", reference=message, delete_after=10)
+    if len(args) < 2:
+        return await message.channel.send(f"Usage: `grr set-exchange-rate <grr_cost> <ssc_reward>`", reference=message)
+    try:
+        grr_cost = int(args[0])
+        ssc_reward = int(args[1])
+        if grr_cost <= 0 or ssc_reward <= 0: raise ValueError
+    except (ValueError, IndexError):
+        return await message.channel.send("Please provide valid positive numbers for both GRR cost and SSC reward.", reference=message)
+
+    await db.set_config_value('exchange_grr_cost', str(grr_cost))
+    await db.set_config_value('exchange_ssc_reward', str(ssc_reward))
+    await message.channel.send(f"⚙️ Exchange rate updated! It now costs **{grr_cost:,} GRR** to get **{ssc_reward:,} {CURRENCY_SYMBOL}**.", reference=message)
+
+async def handle_grr_set_disabled_message(message: discord.Message, args: list):
+    if not is_constellation_from_message(message): return await message.channel.send("The Star Stream does not recognize your Modifier.", reference=message, delete_after=10)
+    
+    # We need to reconstruct the message from the original content, not the lowercased split args
+    original_parts = message.content.split(maxsplit=2)
+    if len(original_parts) < 3:
+        return await message.channel.send("Usage: `grr set-disabled-message <your message here>`", reference=message)
+    
+    new_message = original_parts[2]
+    await db.set_config_value('exchange_disabled_message', new_message)
+    await message.channel.send(f"⚙️ Exchange disabled message updated to: \"{new_message}\"", reference=message)
+
 # --- MAIN MESSAGE ROUTER ---
 @bot.event
 async def on_message(message: discord.Message):
@@ -367,18 +440,24 @@ async def on_message(message: discord.Message):
         return
 
     parts = message.content.lower().split()
+    # For commands that need the original casing/spacing, we pass the raw content
     command_args = message.content.split()[2:]
     
     command_map = {
+        'help': handle_grr_help,
         'cash': handle_grr_cash, 'bal': handle_grr_cash,
         'daily': handle_grr_daily,
         'exchange': handle_grr_exchange,
         'cf': handle_grr_cf,
         'bet': handle_grr_bet,
-        'slots': handle_grr_slots,
+        'slots': handle_grr_slots, 'slot': handle_grr_slots,
         'leaderboard': handle_grr_leaderboard, 'lb': handle_grr_leaderboard,
         'pay': handle_grr_pay, 'give': handle_grr_pay,
+        # Admin commands
         'set-winrate': handle_grr_set_winrate,
+        'toggle-exchange': handle_grr_toggle_exchange,
+        'set-exchange-rate': handle_grr_set_exchange_rate,
+        'set-disabled-message': handle_grr_set_disabled_message,
     }
 
     if len(parts) > 1:
@@ -523,7 +602,7 @@ async def shop_view(ctx: discord.ApplicationContext):
                         purchaser = bot.get_user(item['purchased_by_user_id']) or await bot.fetch_user(item['purchased_by_user_id'])
                         purchaser_mention = purchaser.mention
                     except discord.NotFound:
-                        purchaser_mention = f"Forgotten Incarnation"
+                        purchaser_mention = f"A Forgotten Incarnation"
                     item_line += f"**Status:** 🔴 CLAIMED (by {purchaser_mention})\n"
                 else:
                     item_line += "**Type:** ✨ Hidden Piece (Unique)\n"
