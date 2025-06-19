@@ -27,14 +27,18 @@ except (TypeError, ValueError):
     ADMIN_LOG_CHANNEL_ID = None
     print("WARNING: ADMIN_LOG_CHANNEL_ID not found or invalid in .env file. Admin channel logging is disabled.")
 
-CONSTELLATION_USER_IDS = [1072508556907139133] # Replace with your admin user IDs
-CONSTELLATION_ROLE_IDS = [1382715685276221483] # Replace with your admin role IDs
+CONSTELLATION_USER_IDS = [1374059561417441324] # Replace with your admin user IDs
+CONSTELLATION_ROLE_IDS = [1385328476503933071] # Replace with your admin role IDs
 
 CURRENCY_NAME = "Starstream Coin"
 CURRENCY_SYMBOL = "SSC"
 
-MAIN_GUILD_ID = 1369930083564912670 # Replace with your main guild ID
+MAIN_GUILD_ID = 1385328262615400458 # Replace with your main guild ID
+
+# --- NEW: BETTING LIMIT ---
+MAX_GRR_BET = 250000
 # --- END CONFIGURATION ---
+
 
 # --- BOT SETUP ---
 intents = discord.Intents.default()
@@ -173,8 +177,10 @@ async def handle_grr_exchange(message: discord.Message, args: list):
 async def handle_grr_cf(message: discord.Message, args: list):
     if not args:
         return await message.channel.send("Usage: `grr cf <amount|all> [t for tails]`", reference=message)
+    
     choice = "Tails" if len(args) > 1 and args[1].lower() == 't' else "Heads"
     balance = await db.get_grr_balance(message.author.id)
+
     if args[0].lower() == 'all':
         if balance <= 0: return await message.channel.send("You have no GRR coins to bet!", reference=message)
         bet_amount = balance
@@ -184,13 +190,20 @@ async def handle_grr_cf(message: discord.Message, args: list):
             if bet_amount <= 0: return await message.channel.send("You must bet a positive amount.", reference=message)
         except ValueError:
             return await message.channel.send(f"'{args[0]}' is not a valid number.", reference=message)
+    
+    if bet_amount > MAX_GRR_BET:
+        bet_amount = MAX_GRR_BET
+
     if balance < bet_amount:
         return await message.channel.send(f"You can't bet **{bet_amount:,}** GRR, you only have **{balance:,}**.", reference=message)
+
     win_rate_str = await db.get_config_value('cf_win_rate', '0.31')
     win_rate = float(win_rate_str)
     await db.add_grr_coins(message.author.id, -bet_amount)
+    
     initial_msg = await message.channel.send(f"Flipping a coin for **{bet_amount:,}** GRR... your choice is **{choice}**! 🪙", reference=message)
     await asyncio.sleep(2)
+    
     win = random.random() < win_rate
     payout = bet_amount * 2
     if win:
@@ -199,22 +212,35 @@ async def handle_grr_cf(message: discord.Message, args: list):
     else:
         actual_flip = "Tails" if choice == "Heads" else "Heads"
         outcome_desc = f"Tough luck! It was **{actual_flip}**. You lost **{bet_amount:,}** GRR."
+    
     new_balance = await db.get_grr_balance(message.author.id)
     final_response = f"{message.author.mention}, {outcome_desc}\nYour new balance is **{new_balance:,}** GRR."
     await initial_msg.edit(content=final_response)
 
 async def handle_grr_bet(message: discord.Message, args: list):
-    if not args: return await message.channel.send("Usage: `grr bet <amount>`", reference=message)
-    try:
-        bet_amount = int(args[0])
-        if bet_amount <= 0: return await message.channel.send("You must bet a positive amount.", reference=message)
-    except ValueError:
-        return await message.channel.send("That's not a valid number.", reference=message)
+    if not args: return await message.channel.send("Usage: `grr bet <amount|all>`", reference=message)
+    
     balance = await db.get_grr_balance(message.author.id)
+
+    if args[0].lower() == 'all':
+        if balance <= 0: return await message.channel.send("You have no GRR coins to bet!", reference=message)
+        bet_amount = balance
+    else:
+        try:
+            bet_amount = int(args[0])
+            if bet_amount <= 0: return await message.channel.send("You must bet a positive amount.", reference=message)
+        except ValueError:
+            return await message.channel.send("That's not a valid number.", reference=message)
+
+    if bet_amount > MAX_GRR_BET:
+        bet_amount = MAX_GRR_BET
+
     if balance < bet_amount: return await message.channel.send(f"You can't bet more than you have! Your balance is **{balance:,}** GRR.", reference=message)
+
     win_rate_str = await db.get_config_value('bet_win_rate', '0.29')
     win_rate = float(win_rate_str)
     await db.add_grr_coins(message.author.id, -bet_amount)
+    
     win = random.random() < win_rate
     payout = 0
     if win:
@@ -222,6 +248,7 @@ async def handle_grr_bet(message: discord.Message, args: list):
         sigma = bet_amount * 0.75
         payout = max(0, int(round(random.gauss(mu, sigma))))
         await db.add_grr_coins(message.author.id, payout)
+        
     new_balance = await db.get_grr_balance(message.author.id)
     profit = payout - bet_amount
     title = "🎉 High-Stakes Win! 🎉" if profit > 0 else "💸 High-Stakes Loss 💸"
@@ -249,22 +276,30 @@ async def handle_grr_slots(message: discord.Message, args: list):
         except ValueError:
             return await message.channel.send(f"'{args[0]}' is not a valid number.", reference=message)
 
+    if bet_amount > MAX_GRR_BET:
+        bet_amount = MAX_GRR_BET
+
     if balance < bet_amount:
         return await message.channel.send(f"You can't bet **{bet_amount:,}** GRR, you only have **{balance:,}**.", reference=message)
 
     await db.add_grr_coins(message.author.id, -bet_amount)
 
-    # Slot machine setup
-    emojis = {
-        "🍒": 5, "🍇": 5, "🍊": 5, # Common, 5x
-        "🍋": 8, "🔔": 8, # Uncommon, 8x
-        "💎": 15,          # Rare, 15x
-        "🍀": 25,          # Very Rare, 25x
-        "💰": 50           # Jackpot, 50x
+    # --- NEW: Configurable Slot Machine Setup ---
+    emojis_config = {
+        "🍒": ("slots_multiplier_cherry", 5), "🍇": ("slots_multiplier_grape", 5), 
+        "🍊": ("slots_multiplier_orange", 5), "🍋": ("slots_multiplier_lemon", 8), 
+        "🔔": ("slots_multiplier_bell", 8), "💎": ("slots_multiplier_diamond", 15),
+        "🍀": ("slots_multiplier_clover", 25), "💰": ("slots_multiplier_moneybag", 50)
     }
     
+    payout_multipliers = {}
+    for symbol, (config_key, default_value) in emojis_config.items():
+        payout_multipliers[symbol] = int(await db.get_config_value(config_key, str(default_value)))
+    
+    two_of_a_kind_multiplier = int(await db.get_config_value("slots_multiplier_2_of_a_kind", "2"))
+
     # Weights for more realistic reel stops
-    symbols = list(emojis.keys())
+    symbols = list(payout_multipliers.keys())
     weights = [10, 10, 10, 8, 8, 5, 3, 1] 
 
     initial_msg = await message.channel.send(f"Betting **{bet_amount:,} GRR**... Good luck!\n**[ ❓ | ❓ | ❓ ]**", reference=message)
@@ -288,14 +323,14 @@ async def handle_grr_slots(message: discord.Message, args: list):
     if final_reels[0] == final_reels[1] == final_reels[2]:
         win = True
         winning_symbol = final_reels[0]
-        multiplier = emojis[winning_symbol]
+        multiplier = payout_multipliers[winning_symbol]
         payout = bet_amount * multiplier
         result_text = f"🎉 **JACKPOT!** Three **{winning_symbol}**! You win **{payout:,}** GRR!"
     # Two of a kind (small win)
     elif final_reels[0] == final_reels[1] or final_reels[1] == final_reels[2]:
         win = True
         winning_symbol = final_reels[1] # The middle reel will be part of any 2-pair
-        multiplier = 2 # Small win pays 2x the bet
+        multiplier = two_of_a_kind_multiplier
         payout = bet_amount * multiplier
         result_text = f"👍 **Small Win!** Two **{winning_symbol}**! You win **{payout:,}** GRR!"
 
@@ -311,6 +346,7 @@ async def handle_grr_slots(message: discord.Message, args: list):
                      f"Your new balance is **{new_balance:,}** GRR.")
 
     await initial_msg.edit(content=final_content)
+
 
 async def handle_grr_help(message: discord.Message, args: list):
     """Displays the help message for all GRR commands."""
@@ -331,7 +367,7 @@ async def handle_grr_help(message: discord.Message, args: list):
     gambling_commands = (
         "`grr cf <amount|all> [t]` - Flips a coin. Bet on heads (default) or tails (t).\n"
         "`grr slots <amount|all>` - Plays the slot machine. (Alias: `slot`)\n"
-        "`grr bet <amount>` - Makes a high-risk, high-reward bet."
+        "`grr bet <amount|all>` - Makes a high-risk, high-reward bet."
     )
     embed.add_field(name="🎲 Gambling Commands", value=gambling_commands, inline=False)
     if is_constellation_from_message(message):

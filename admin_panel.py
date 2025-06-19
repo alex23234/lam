@@ -190,6 +190,23 @@ async def post_shop_action(request: web.Request):
 
 async def get_settings(request: web.Request):
     configs = await db.get_all_configs()
+    
+    # --- NEW: Build HTML for slot machine settings ---
+    slots_configs = {
+        "2_of_a_kind": ("Small Win (2-of-a-kind)", 2),
+        "cherry": ("Jackpot 🍒", 5), "grape": ("Jackpot 🍇", 5), "orange": ("Jackpot 🍊", 5),
+        "lemon": ("Jackpot 🍋", 8), "bell": ("Jackpot 🔔", 8), "diamond": ("Jackpot 💎", 15),
+        "clover": ("Jackpot 🍀", 25), "moneybag": ("Jackpot 💰", 50)
+    }
+    slots_form_rows = ""
+    for key, (label, default) in slots_configs.items():
+        db_key = f'slots_multiplier_{key}'
+        value = configs.get(db_key, str(default))
+        slots_form_rows += f"""
+            <label for="slots-multiplier-{key}">{label} Multiplier</label>
+            <input type="number" step="1" id="slots-multiplier-{key}" class="slots-multiplier-input" data-key="{key}" value="{value}">
+        """
+
     context = {
         'cf_win_rate': float(configs.get('cf_win_rate', 0.31)) * 100,
         'bet_win_rate': float(configs.get('bet_win_rate', 0.29)) * 100,
@@ -197,6 +214,7 @@ async def get_settings(request: web.Request):
         'exchange_disabled_message': html.escape(configs.get('exchange_disabled_message', 'The exchange is currently disabled.')),
         'exchange_grr_cost': configs.get('exchange_grr_cost', '5000'),
         'exchange_ssc_reward': configs.get('exchange_ssc_reward', '100'),
+        'slots_form_rows': slots_form_rows,
     }
     with open('./templates/settings.html', 'r', encoding='utf-8') as f:
         html_content = f.read()
@@ -208,21 +226,26 @@ async def get_settings(request: web.Request):
         .replace("{{ exchange_disabled_message }}", context['exchange_disabled_message'])
         .replace("{{ exchange_grr_cost }}", context['exchange_grr_cost'])
         .replace("{{ exchange_ssc_reward }}", context['exchange_ssc_reward'])
+        .replace("{{ slots_form_rows }}", context['slots_form_rows'])
     )
     return web.Response(text=response_html, content_type='text/html')
 
 async def post_update_settings(request: web.Request):
     try:
         data = await request.json()
-        cf_rate = float(data['cf_win_rate']) / 100.0
-        bet_rate = float(data['bet_win_rate']) / 100.0
-        await db.set_config_value('cf_win_rate', str(cf_rate))
-        await db.set_config_value('bet_win_rate', str(bet_rate))
-
+        
+        # Standard settings
+        await db.set_config_value('cf_win_rate', str(float(data['cf_win_rate']) / 100.0))
+        await db.set_config_value('bet_win_rate', str(float(data['bet_win_rate']) / 100.0))
         await db.set_config_value('exchange_enabled', str(data['exchange_enabled']).lower())
         await db.set_config_value('exchange_disabled_message', data['exchange_disabled_message'])
         await db.set_config_value('exchange_grr_cost', str(int(data['exchange_grr_cost'])))
         await db.set_config_value('exchange_ssc_reward', str(int(data['exchange_ssc_reward'])))
+
+        # --- NEW: Iterate and save all slot machine settings ---
+        for key, value in data.items():
+            if key.startswith('slots_multiplier_'):
+                await db.set_config_value(key, str(int(value)))
 
         return web.json_response({'status': 'success'})
     except Exception as e:

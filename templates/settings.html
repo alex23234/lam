@@ -32,6 +32,14 @@
         </div>
 
         <div class="card">
+            <h2>Slot Machine Settings</h2>
+            <p>Adjust the payout multipliers for the `grr slots` game. This affects the payout, not the visual odds of winning.</p>
+            <div class="form-grid" id="slots-settings-grid">
+                {{ slots_form_rows }}
+            </div>
+        </div>
+
+        <div class="card">
             <h2>GRR to SSC Exchange Settings</h2>
             <div class="form-grid">
                 <label for="exchange-enabled">Enable Exchange</label>
@@ -84,6 +92,13 @@
                 exchange_grr_cost: document.getElementById('exchange-grr-cost').value,
                 exchange_ssc_reward: document.getElementById('exchange-ssc-reward').value
             };
+            
+            // NEW: Collect all slot multiplier values
+            document.querySelectorAll('.slots-multiplier-input').forEach(input => {
+                const dbKey = `slots_multiplier_${input.dataset.key}`;
+                payload[dbKey] = input.value;
+            });
+
             try {
                 const response = await fetch('/api/settings/update', {
                     method: 'POST',
