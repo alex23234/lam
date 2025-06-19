@@ -27,13 +27,13 @@ except (TypeError, ValueError):
     ADMIN_LOG_CHANNEL_ID = None
     print("WARNING: ADMIN_LOG_CHANNEL_ID not found or invalid in .env file. Admin channel logging is disabled.")
 
-CONSTELLATION_USER_IDS = [1374059561417441324] # Replace with your admin user IDs
-CONSTELLATION_ROLE_IDS = [1385328476503933071] # Replace with your admin role IDs
+CONSTELLATION_USER_IDS = [1072508556907139133] # Replace with your admin user IDs
+CONSTELLATION_ROLE_IDS = [1382715685276221483] # Replace with your admin role IDs
 
 CURRENCY_NAME = "Starstream Coin"
 CURRENCY_SYMBOL = "SSC"
 
-MAIN_GUILD_ID = 1385328262615400458 # Replace with your main guild ID
+MAIN_GUILD_ID = 1369930083564912670 # Replace with your main guild ID
 
 # --- NEW: BETTING LIMIT ---
 MAX_GRR_BET = 250000
